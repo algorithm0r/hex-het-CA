@@ -25,6 +25,7 @@ var PARAMETERS = {
 
     // Mutation
     mutationRate: 0.01,    // per-condition probability of reassignment on reproduction
+    atrophyRate: 0.05,     // extra deletion probability for rules unfired in last 2 generations
 
     // Initial population
     initialDensity: 0.2,   // fraction of cells initially alive
@@ -38,6 +39,7 @@ function loadParameters() {
     PARAMETERS.initialDensity = parseFloat(document.getElementById('initialDensity').value);
     PARAMETERS.genomeP       = parseFloat(document.getElementById('genomeP').value);
     PARAMETERS.mutationRate  = parseFloat(document.getElementById('mutationRate').value);
+    PARAMETERS.atrophyRate   = parseFloat(document.getElementById('atrophyRate').value);
     PARAMETERS.updatesPerDraw = parseInt(document.getElementById('updatesPerDraw').value);
     PARAMETERS.cellSize      = parseInt(document.getElementById('cellSize').value);
 }

@@ -53,6 +53,10 @@ class HexCA {
         // Move-to-front color history per cell (length n per cell)
         this.mtf = new Int8Array(this.N * this.n);
 
+        // Two-generation firing flags per condition per cell
+        this.firedSelf   = new Uint8Array(this.N * this.ncond);
+        this.firedParent = new Uint8Array(this.N * this.ncond);
+
         // Stats exposed each tick for Stats entity
         this.currentStats = {
             liveCount: 0,
@@ -179,7 +183,7 @@ class HexCA {
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts, mtf} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent} = this;
         const {k, pDeath} = PARAMETERS;
         const color      = this.color;
         const nextColor  = this.nextColor;
@@ -220,6 +224,7 @@ class HexCA {
                     nextColor[i] = -1;
                     ruleDeathsThisTick++;
                 } else {
+                    firedSelf[i * ncond + condIdx] = 1;
                     nextColor[i] = rule;
                     if (rule !== s) {
                         // MTF: find depth of new color, earn that energy, move to front
@@ -257,13 +262,19 @@ class HexCA {
 
             genomes.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
             mtf.copyWithin(target.key * n, i * n, i * n + n);
+            firedParent.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
+            firedSelf.fill(0, target.key * ncond, (target.key + 1) * ncond);
 
             const mutRate = PARAMETERS.mutationRate;
+            const atrophyRate = PARAMETERS.atrophyRate;
             const base = target.key * ncond;
+            const iBase = i * ncond;
             let newSize = 0;
             for (let c = 0; c < ncond; c++) {
                 if (Math.random() < mutRate) {
                     genomes[base + c] = Math.random() < 0.5 ? -1 : randomInt(n);
+                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0) {
+                    if (Math.random() < atrophyRate) genomes[base + c] = -1;
                 }
                 if (genomes[base + c] !== -1) newSize++;
             }
