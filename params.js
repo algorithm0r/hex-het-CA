@@ -1,5 +1,5 @@
 var PARAMETERS = {
-    updatesPerDraw: 1,
+    updatesPerDraw: 50,
 
     // Canvas
     canvasWidth: 1800,
@@ -18,7 +18,7 @@ var PARAMETERS = {
     pDeath: 0.001,  // random death probability per tick per cell
 
     // Stats / graphs
-    reportingPeriod: 10,   // ticks between data samples
+    reportingPeriod: 1000, // ticks between data samples
     graphWidth: 560,
     graphHeight: 130,
     numGenomeBuckets: 20,  // histogram y-axis buckets (genome size 0–252)
@@ -27,7 +27,7 @@ var PARAMETERS = {
     mutationRate: 0.01,    // per-condition probability of reassignment on reproduction
 
     // Initial population
-    initialDensity: 1.0,   // fraction of cells initially alive
+    initialDensity: 0.2,   // fraction of cells initially alive
     genomeP: 0.05,         // floor probability for rules at n_dead=0; rises to 100% at n_dead=6
 };
 
