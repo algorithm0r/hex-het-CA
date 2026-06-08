@@ -272,7 +272,6 @@ class HexCA {
             firedSelf.fill(0, target.key * ncond, (target.key + 1) * ncond);
 
             const mutRate = PARAMETERS.mutationRate;
-            const atrophyRate = PARAMETERS.atrophyRate;
             const positiveRate = PARAMETERS.positiveRate;
             const base = target.key * ncond;
             const iBase = i * ncond;
@@ -280,8 +279,9 @@ class HexCA {
             for (let c = 0; c < ncond; c++) {
                 if (Math.random() < mutRate) {
                     genomes[base + c] = Math.random() < 0.5 ? -1 : randomInt(n);
-                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0 && !globalEncountered[c]) {
-                    if (Math.random() < atrophyRate) genomes[base + c] = -1;
+                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0) {
+                    const rate = globalEncountered[c] ? PARAMETERS.localAtrophyRate : PARAMETERS.globalAtrophyRate;
+                    if (Math.random() < rate) genomes[base + c] = -1;
                 } else if (genomes[base + c] === -1 && globalEncountered[c]) {
                     if (Math.random() < positiveRate) genomes[base + c] = randomInt(n);
                 }

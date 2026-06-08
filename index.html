@@ -43,8 +43,11 @@
             <label for="mutationRate">Mutation rate (per condition):</label>
             <input type="number" id="mutationRate" value="0.01" min="0" max="1" step="0.001" />
 
-            <label for="atrophyRate">Atrophy rate (unfired rules):</label>
-            <input type="number" id="atrophyRate" value="0.05" min="0" max="1" step="0.005" />
+            <label for="localAtrophyRate">Local atrophy rate (unfired, globally active):</label>
+            <input type="number" id="localAtrophyRate" value="0.02" min="0" max="1" step="0.005" />
+
+            <label for="globalAtrophyRate">Global atrophy rate (unfired, globally absent):</label>
+            <input type="number" id="globalAtrophyRate" value="0.1" min="0" max="1" step="0.005" />
 
             <label for="positiveRate">Positive mutation rate (death conditions):</label>
             <input type="number" id="positiveRate" value="0.02" min="0" max="1" step="0.005" />

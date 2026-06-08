@@ -25,7 +25,8 @@ var PARAMETERS = {
 
     // Mutation
     mutationRate: 0.01,    // per-condition probability of reassignment on reproduction
-    atrophyRate: 0.05,     // extra deletion probability for rules unfired in last 2 generations
+    localAtrophyRate: 0.02,  // deletion rate for rules unfired locally but active globally
+    globalAtrophyRate: 0.1,  // deletion rate for rules unfired locally and absent globally
     positiveRate: 0.02,    // creation probability for absent rules that caused deaths last tick
 
     // Initial population
@@ -40,7 +41,8 @@ function loadParameters() {
     PARAMETERS.initialDensity = parseFloat(document.getElementById('initialDensity').value);
     PARAMETERS.genomeP       = parseFloat(document.getElementById('genomeP').value);
     PARAMETERS.mutationRate  = parseFloat(document.getElementById('mutationRate').value);
-    PARAMETERS.atrophyRate   = parseFloat(document.getElementById('atrophyRate').value);
+    PARAMETERS.localAtrophyRate  = parseFloat(document.getElementById('localAtrophyRate').value);
+    PARAMETERS.globalAtrophyRate = parseFloat(document.getElementById('globalAtrophyRate').value);
     PARAMETERS.positiveRate  = parseFloat(document.getElementById('positiveRate').value);
     PARAMETERS.updatesPerDraw = parseInt(document.getElementById('updatesPerDraw').value);
     PARAMETERS.cellSize      = parseInt(document.getElementById('cellSize').value);
