@@ -58,7 +58,7 @@ class HexCA {
         this.firedParent = new Uint8Array(this.N * this.ncond);
 
         // Global death conditions from last tick (conditions that killed at least one cell)
-        this.globalDeathConditions = new Uint8Array(this.ncond);
+        this.globalEncountered = new Uint8Array(this.ncond);
 
         // Stats exposed each tick for Stats entity
         this.currentStats = {
@@ -186,7 +186,7 @@ class HexCA {
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalDeathConditions} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered} = this;
         const {k, pDeath} = PARAMETERS;
         const color      = this.color;
         const nextColor  = this.nextColor;
@@ -195,7 +195,7 @@ class HexCA {
         const genomeSize = this.genomeSize;
 
         nextColor.set(color);
-        globalDeathConditions.fill(0);
+        globalEncountered.fill(0);
 
         const reprodList = [];
         let birthsThisTick     = 0;
@@ -224,10 +224,11 @@ class HexCA {
                 const condIdx = condLookup[key];
                 const rule    = condIdx >= 0 ? genomes[i * ncond + condIdx] : -1;
 
+                if (condIdx >= 0) globalEncountered[condIdx] = 1;
+
                 if (rule === -1) {
                     nextColor[i] = -1;
                     ruleDeathsThisTick++;
-                    if (condIdx >= 0) globalDeathConditions[condIdx] = 1;
                 } else {
                     firedSelf[i * ncond + condIdx] = 1;
                     nextColor[i] = rule;
@@ -279,9 +280,9 @@ class HexCA {
             for (let c = 0; c < ncond; c++) {
                 if (Math.random() < mutRate) {
                     genomes[base + c] = Math.random() < 0.5 ? -1 : randomInt(n);
-                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0 && !globalDeathConditions[c]) {
+                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0 && !globalEncountered[c]) {
                     if (Math.random() < atrophyRate) genomes[base + c] = -1;
-                } else if (genomes[base + c] === -1 && globalDeathConditions[c]) {
+                } else if (genomes[base + c] === -1 && globalEncountered[c]) {
                     if (Math.random() < positiveRate) genomes[base + c] = randomInt(n);
                 }
                 if (genomes[base + c] !== -1) newSize++;
