@@ -50,6 +50,9 @@ class HexCA {
         // Reusable neighbor count buffer (avoids allocation in inner loop)
         this._counts = new Int32Array(this.n);
 
+        // Move-to-front color history per cell (length n per cell)
+        this.mtf = new Int8Array(this.N * this.n);
+
         // Stats exposed each tick for Stats entity
         this.currentStats = {
             liveCount: 0,
@@ -130,7 +133,11 @@ class HexCA {
             for (let row = 0; row < this.rows; row++) {
                 if (Math.random() < density) {
                     const i = col * this.rows + row;
-                    this.color[i] = randomInt(n);
+                    const c = randomInt(n);
+                    this.color[i] = c;
+                    this.mtf[i * n] = c;
+                    let slot = 1;
+                    for (let ci = 0; ci < n; ci++) if (ci !== c) this.mtf[i * n + slot++] = ci;
                     const {genome, size} = this._generateRandomGenome();
                     this.genomes.set(genome, i * ncond);
                     this.genomeSize[i] = size;
@@ -172,7 +179,7 @@ class HexCA {
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf} = this;
         const {k, pDeath} = PARAMETERS;
         const color      = this.color;
         const nextColor  = this.nextColor;
@@ -215,7 +222,14 @@ class HexCA {
                 } else {
                     nextColor[i] = rule;
                     if (rule !== s) {
-                        counter[i]++;
+                        // MTF: find depth of new color, earn that energy, move to front
+                        const mtfBase = i * n;
+                        let idx = 0;
+                        while (idx < n && mtf[mtfBase + idx] !== rule) idx++;
+                        counter[i] += idx;
+                        for (let j = idx; j > 0; j--) mtf[mtfBase + j] = mtf[mtfBase + j - 1];
+                        mtf[mtfBase] = rule;
+
                         const threshold = k * genomeSize[i];
                         if (threshold > 0 && counter[i] > threshold) {
                             reprodList.push({col, row, i, depth: Math.floor(counter[i] / threshold)});
@@ -242,6 +256,7 @@ class HexCA {
             if (nextColor[target.key] !== -1) continue;
 
             genomes.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
+            mtf.copyWithin(target.key * n, i * n, i * n + n);
 
             const mutRate = PARAMETERS.mutationRate;
             const base = target.key * ncond;
