@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Hex CA</title>
+    <link rel="stylesheet" type="text/css" href="./style.css">
+    <script type="text/javascript" src="./assetmanager.js"></script>
+    <script type="text/javascript" src="./gameengine.js"></script>
+    <script type="text/javascript" src="./util.js"></script>
+    <script type="text/javascript" src="./params.js"></script>
+    <script type="text/javascript" src="./hexca.js"></script>
+    <script type="text/javascript" src="./graph.js"></script>
+    <script type="text/javascript" src="./histogram.js"></script>
+    <script type="text/javascript" src="./stats.js"></script>
+    <script type="text/javascript" src="./main.js"></script>
+</head>
+<body>
+    <canvas id="gameWorld" width="1800" height="960"></canvas>
+    <div id="controlPanel">
+        <div id="frameRate">FPS: --</div>
+        <div id="tickCount">Tick: 0</div>
+        <div id="parameters">
+            <label for="n">Colors (n):</label>
+            <select id="n">
+                <option value="3" selected>3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+            </select>
+
+            <label for="k">k (threshold scale):</label>
+            <input type="number" id="k" value="0.1" min="0.01" max="10" step="0.01" />
+
+            <label for="pDeath">Random death rate:</label>
+            <input type="number" id="pDeath" value="0.001" min="0" max="1" step="0.0001" />
+
+            <label for="initialDensity">Initial density:</label>
+            <input type="number" id="initialDensity" value="1.0" min="0" max="1" step="0.05" />
+
+            <label for="genomeP">Init rule floor (at n_dead=0):</label>
+            <input type="number" id="genomeP" value="0.05" min="0" max="1" step="0.01" />
+
+            <label for="mutationRate">Mutation rate (per condition):</label>
+            <input type="number" id="mutationRate" value="0.01" min="0" max="1" step="0.001" />
+
+            <label for="updatesPerDraw">Updates per frame:</label>
+            <input type="number" id="updatesPerDraw" value="1" min="1" max="100" step="1" />
+
+            <label for="cellSize">Cell size (px):</label>
+            <input type="number" id="cellSize" value="8" min="4" max="20" step="1" />
+
+            <button type="button" onclick="reset()">Reset</button>
+        </div>
+    </div>
+</body>
+</html>

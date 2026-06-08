@@ -1,0 +1,69 @@
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: flex-start;
+    font-size: 12px;
+    margin: 0;
+    background-color: #1a1a2e;
+    color: #ddd;
+}
+
+#gameWorld {
+    border: 1px solid #444;
+    flex-shrink: 0;
+}
+
+#controlPanel {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    padding: 10px;
+}
+
+#frameRate, #tickCount {
+    background-color: #2a2a4a;
+    border: 1px solid #555;
+    text-align: center;
+    padding: 4px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+#parameters {
+    border: 1px solid #555;
+    padding: 8px;
+    background-color: #2a2a4a;
+    margin-bottom: 10px;
+}
+
+#parameters label {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #aaa;
+}
+
+#parameters input {
+    width: calc(100% - 6px);
+    padding: 2px 3px;
+    box-sizing: border-box;
+    font-size: 12px;
+    background-color: #1a1a2e;
+    color: #eee;
+    border: 1px solid #555;
+}
+
+#parameters button {
+    margin-top: 10px;
+    width: 100%;
+    padding: 6px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+#parameters button:hover {
+    background-color: #2980b9;
+}

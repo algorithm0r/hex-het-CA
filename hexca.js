@@ -1,0 +1,327 @@
+// ─── Neighbor offsets ─────────────────────────────────────────────────────────
+// Flat-top hexagons, even-q offset (odd columns shifted DOWN by half a cell height).
+const EVEN_NEIGHBORS = [
+    {dc:  0, dr: -1}, // N
+    {dc: +1, dr: -1}, // NE
+    {dc: +1, dr:  0}, // SE
+    {dc:  0, dr: +1}, // S
+    {dc: -1, dr:  0}, // SW
+    {dc: -1, dr: -1}, // NW
+];
+const ODD_NEIGHBORS = [
+    {dc:  0, dr: -1}, // N
+    {dc: +1, dr:  0}, // NE
+    {dc: +1, dr: +1}, // SE
+    {dc:  0, dr: +1}, // S
+    {dc: -1, dr: +1}, // SW
+    {dc: -1, dr:  0}, // NW
+];
+
+// ─── Display colors ───────────────────────────────────────────────────────────
+const DEAD_COLOR = '#111122';
+const ALL_CELL_COLORS = null; // replaced by getCellColors(n)
+
+// Precomputed hex vertex offsets (flat-top, unit size — scaled at draw time)
+const HEX_VERTS = [];
+for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 3 * i;
+    HEX_VERTS.push({x: Math.cos(angle), y: Math.sin(angle)});
+}
+
+// ─── HexCA ────────────────────────────────────────────────────────────────────
+class HexCA {
+    constructor() {
+        this.cols = PARAMETERS.gridCols;
+        this.rows = PARAMETERS.gridRows;
+        this.N    = this.cols * this.rows;
+        this.n    = PARAMETERS.n;
+        this.tick = 0;
+
+        // Build condition table and lookup for this n
+        this._buildConditions();
+
+        // Flat typed arrays for performance
+        this.color      = new Int8Array(this.N).fill(-1);
+        this.nextColor  = new Int8Array(this.N).fill(-1);
+        this.genomes    = new Int8Array(this.N * this.ncond).fill(-1);
+        this.counter    = new Int32Array(this.N);
+        this.genomeSize = new Int16Array(this.N);
+
+        // Reusable neighbor count buffer (avoids allocation in inner loop)
+        this._counts = new Int32Array(this.n);
+
+        // Stats exposed each tick for Stats entity
+        this.currentStats = {
+            liveCount: 0,
+            colorCounts: new Array(this.n).fill(0),
+            genomeSizeSum: 0,
+            births: 0,
+            ruleDeaths: 0,
+            randomDeaths: 0,
+            genomeSizeBuckets: new Array(PARAMETERS.numGenomeBuckets).fill(0),
+        };
+
+        this._initPopulation();
+    }
+
+    // ── Condition table ───────────────────────────────────────────────────────
+    // Enumerate all (selfColor, counts[0..n-1]) where sum(counts) <= 6.
+    // condLookup: key → condition index, where key uses Horner base-7 encoding.
+
+    _buildConditions() {
+        const n = this.n;
+
+        // Enumerate count tuples (without selfColor)
+        const tuples = [];
+        const buf = new Array(n).fill(0);
+        function fill(depth, remaining) {
+            if (depth === n) { tuples.push(buf.slice()); return; }
+            for (let c = 0; c <= remaining; c++) {
+                buf[depth] = c;
+                fill(depth + 1, remaining - c);
+            }
+        }
+        fill(0, 6);
+
+        // Build conditions: [selfColor, ...counts]
+        this.conditions = [];
+        for (let s = 0; s < n; s++) {
+            for (const t of tuples) this.conditions.push([s, ...t]);
+        }
+        this.ncond = this.conditions.length;
+
+        // Build lookup array: max key = n * 7^n - 1
+        const maxKey = n * Math.pow(7, n);
+        this.condLookup = new Int16Array(maxKey).fill(-1);
+        for (let i = 0; i < this.conditions.length; i++) {
+            const cond = this.conditions[i];
+            let key = cond[0];
+            for (let c = 1; c <= n; c++) key = key * 7 + cond[c];
+            this.condLookup[key] = i;
+        }
+    }
+
+    // ── Genome generation ─────────────────────────────────────────────────────
+
+    _generateRandomGenome() {
+        const floor = PARAMETERS.genomeP;
+        const {ncond, n, conditions} = this;
+        const genome = new Int8Array(ncond).fill(-1);
+        let size = 0;
+        for (let i = 0; i < ncond; i++) {
+            const cond = conditions[i];
+            let n_dead = 6;
+            for (let c = 1; c <= n; c++) n_dead -= cond[c];
+            const p = floor + (1 - floor) * (n_dead / 6);
+            if (Math.random() < p) {
+                genome[i] = randomInt(n);
+                size++;
+            }
+        }
+        return {genome, size};
+    }
+
+    // ── Population init ───────────────────────────────────────────────────────
+
+    _initPopulation() {
+        const density = PARAMETERS.initialDensity;
+        const {ncond, n} = this;
+        for (let col = 0; col < this.cols; col++) {
+            for (let row = 0; row < this.rows; row++) {
+                if (Math.random() < density) {
+                    const i = col * this.rows + row;
+                    this.color[i] = randomInt(n);
+                    const {genome, size} = this._generateRandomGenome();
+                    this.genomes.set(genome, i * ncond);
+                    this.genomeSize[i] = size;
+                }
+            }
+        }
+    }
+
+    // ── BFS for empty cells within depth ─────────────────────────────────────
+
+    _findEmptyCells(col, row, depth) {
+        const {cols, rows, nextColor} = this;
+        const visited = new Set();
+        const empty = [];
+        let frontier = [{col, row}];
+        visited.add(col * rows + row);
+
+        for (let d = 0; d < depth; d++) {
+            const next = [];
+            for (const {col: c, row: r} of frontier) {
+                const offsets = c % 2 === 0 ? EVEN_NEIGHBORS : ODD_NEIGHBORS;
+                for (const {dc, dr} of offsets) {
+                    const nc = (c + dc + cols) % cols;
+                    const nr = (r + dr + rows) % rows;
+                    const key = nc * rows + nr;
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        next.push({col: nc, row: nr});
+                        if (nextColor[key] === -1) empty.push({col: nc, row: nr, key});
+                    }
+                }
+            }
+            frontier = next;
+            if (frontier.length === 0) break;
+        }
+        return empty;
+    }
+
+    // ── Main update ───────────────────────────────────────────────────────────
+
+    update() {
+        const {cols, rows, N, n, ncond, condLookup, _counts} = this;
+        const {k, pDeath} = PARAMETERS;
+        const color      = this.color;
+        const nextColor  = this.nextColor;
+        const genomes    = this.genomes;
+        const counter    = this.counter;
+        const genomeSize = this.genomeSize;
+
+        nextColor.set(color);
+
+        const reprodList = [];
+        let birthsThisTick     = 0;
+        let ruleDeathsThisTick = 0;
+        let randomDeathsThisTick = 0;
+
+        // ── Compute pass ──────────────────────────────────────────────────────
+        for (let col = 0; col < cols; col++) {
+            const offsets = col % 2 === 0 ? EVEN_NEIGHBORS : ODD_NEIGHBORS;
+            for (let row = 0; row < rows; row++) {
+                const i = col * rows + row;
+                if (color[i] === -1) continue;
+
+                // Count living neighbors by color
+                _counts.fill(0);
+                for (const {dc, dr} of offsets) {
+                    const nc_color = color[((col + dc + cols) % cols) * rows + (row + dr + rows) % rows];
+                    if (nc_color >= 0) _counts[nc_color]++;
+                }
+
+                // Compute condition key (Horner base-7)
+                const s = color[i];
+                let key = s;
+                for (let c = 0; c < n; c++) key = key * 7 + _counts[c];
+
+                const condIdx = condLookup[key];
+                const rule    = condIdx >= 0 ? genomes[i * ncond + condIdx] : -1;
+
+                if (rule === -1) {
+                    nextColor[i] = -1;
+                    ruleDeathsThisTick++;
+                } else {
+                    nextColor[i] = rule;
+                    if (rule !== s) {
+                        counter[i]++;
+                        const threshold = k * genomeSize[i];
+                        if (threshold > 0 && counter[i] > threshold) {
+                            reprodList.push({col, row, i, depth: Math.floor(counter[i] / threshold)});
+                        }
+                    }
+                }
+
+                if (nextColor[i] !== -1 && Math.random() < pDeath) {
+                    nextColor[i] = -1;
+                    randomDeathsThisTick++;
+                }
+            }
+        }
+
+        // ── Reproduction pass ─────────────────────────────────────────────────
+        shuffle(reprodList);
+        for (const {col, row, i, depth} of reprodList) {
+            if (nextColor[i] === -1) continue;
+
+            const candidates = this._findEmptyCells(col, row, depth);
+            if (candidates.length === 0) continue;
+
+            const target = candidates[randomInt(candidates.length)];
+            if (nextColor[target.key] !== -1) continue;
+
+            genomes.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
+
+            const mutRate = PARAMETERS.mutationRate;
+            const base = target.key * ncond;
+            let newSize = 0;
+            for (let c = 0; c < ncond; c++) {
+                if (Math.random() < mutRate) {
+                    genomes[base + c] = Math.random() < 0.5 ? -1 : randomInt(n);
+                }
+                if (genomes[base + c] !== -1) newSize++;
+            }
+            genomeSize[target.key] = newSize;
+            nextColor[target.key]  = color[i];
+            counter[target.key]    = 0;
+            counter[i]             = 0;
+            birthsThisTick++;
+        }
+
+        // ── Apply pass ────────────────────────────────────────────────────────
+        color.set(nextColor);
+
+        // ── Stats pass ────────────────────────────────────────────────────────
+        const stats = this.currentStats;
+        stats.births      = birthsThisTick;
+        stats.ruleDeaths  = ruleDeathsThisTick;
+        stats.randomDeaths = randomDeathsThisTick;
+        stats.liveCount   = 0;
+        stats.colorCounts.fill(0);
+        stats.genomeSizeSum = 0;
+        stats.genomeSizeBuckets.fill(0);
+        const numBuckets = PARAMETERS.numGenomeBuckets;
+        for (let i = 0; i < N; i++) {
+            const c = color[i];
+            if (c !== -1) {
+                stats.liveCount++;
+                stats.colorCounts[c]++;
+                const gs = genomeSize[i];
+                stats.genomeSizeSum += gs;
+                stats.genomeSizeBuckets[Math.min(numBuckets - 1, Math.floor(gs * numBuckets / (ncond + 1)))]++;
+            }
+        }
+
+        this.tick++;
+        document.getElementById('tickCount').textContent = `Tick: ${this.tick}`;
+    }
+
+    // ── Draw ──────────────────────────────────────────────────────────────────
+
+    draw(ctx) {
+        const {n} = this;
+        const size  = PARAMETERS.cellSize;
+        const sqrt3 = Math.sqrt(3);
+        const cellColors = getCellColors(n);
+
+        const groups = Array.from({length: n + 1}, () => []);
+        for (let col = 0; col < this.cols; col++) {
+            for (let row = 0; row < this.rows; row++) {
+                const i = col * this.rows + row;
+                const c = this.color[i];
+                const g = c === -1 ? 0 : c + 1;
+                const x = col * size * 1.5 + size;
+                const y = row * size * sqrt3 + (col % 2 === 1 ? size * sqrt3 / 2 : 0) + size;
+                groups[g].push(x, y);
+            }
+        }
+
+        const fills = [DEAD_COLOR, ...cellColors];
+        for (let g = 0; g <= n; g++) {
+            const pts = groups[g];
+            if (pts.length === 0) continue;
+            ctx.fillStyle = fills[g];
+            ctx.beginPath();
+            for (let p = 0; p < pts.length; p += 2) {
+                const cx = pts[p], cy = pts[p + 1];
+                ctx.moveTo(cx + size * HEX_VERTS[0].x, cy + size * HEX_VERTS[0].y);
+                for (let v = 1; v < 6; v++) {
+                    ctx.lineTo(cx + size * HEX_VERTS[v].x, cy + size * HEX_VERTS[v].y);
+                }
+                ctx.closePath();
+            }
+            ctx.fill();
+        }
+    }
+}
