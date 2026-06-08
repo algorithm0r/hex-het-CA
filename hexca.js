@@ -279,7 +279,7 @@ class HexCA {
             for (let c = 0; c < ncond; c++) {
                 if (Math.random() < mutRate) {
                     genomes[base + c] = Math.random() < 0.5 ? -1 : randomInt(n);
-                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0) {
+                } else if (genomes[base + c] !== -1 && firedSelf[iBase + c] === 0 && firedParent[iBase + c] === 0 && !globalDeathConditions[c]) {
                     if (Math.random() < atrophyRate) genomes[base + c] = -1;
                 } else if (genomes[base + c] === -1 && globalDeathConditions[c]) {
                     if (Math.random() < positiveRate) genomes[base + c] = randomInt(n);
