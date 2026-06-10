@@ -87,6 +87,7 @@ class HexCA {
             genomeSizeBuckets: new Array(PARAMETERS.numGenomeBuckets).fill(0),
             clusterCoeff: 0,
             meanAge: 0,
+            maxAge: 1,
             ageBuckets: new Array(PARAMETERS.numGenomeBuckets).fill(0),
         };
 
@@ -410,6 +411,7 @@ class HexCA {
         stats.ageBuckets.fill(0);
         const numBuckets = PARAMETERS.numGenomeBuckets;
         const tick = this.tick;
+        let maxAge = 1;
         for (let i = 0; i < N; i++) {
             const c = color[i];
             if (c !== -1) {
@@ -420,11 +422,15 @@ class HexCA {
                 stats.genomeSizeBuckets[Math.min(numBuckets - 1, Math.floor(gs * numBuckets / (ncond + 1)))]++;
                 const age = tick - birthTick[i];
                 stats.meanAge += age;
-                const maxDisplayAge = PARAMETERS.reportingPeriod * 10;
-                stats.ageBuckets[Math.min(numBuckets - 1, Math.floor(age / maxDisplayAge * numBuckets))]++;
+                if (age > maxAge) maxAge = age;
             }
         }
         if (stats.liveCount > 0) stats.meanAge /= stats.liveCount;
+        stats.maxAge = maxAge;
+        for (let i = 0; i < N; i++) {
+            if (color[i] !== -1)
+                stats.ageBuckets[Math.min(numBuckets - 1, Math.floor((tick - birthTick[i]) / maxAge * numBuckets))]++;
+        }
 
         // Clustering coefficient: mean fraction of same-color live neighbors per cell
         let clusterSum = 0, clusterCount = 0;
