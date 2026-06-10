@@ -57,9 +57,10 @@ class Stats {
             ['#ffffff'], false));
         gy += gh + gap;
 
-        this.graphs.push(new Graph(gx, gy, [this.meanAgeSeries],
-            'Mean cell age (ticks)', 0, 1,
-            ['#1abc9c'], true));
+        const ageHistH = 130;
+        this.ageHistogram = new Histogram(gx, gy, gw, ageHistH,
+            this.ageDist, 'Age distribution & mean (white) — 0=newborn, 1=sim age',
+            PARAMETERS.numGenomeBuckets, 0, 1, this.meanAgeSeries);
     }
 
     update() {
@@ -90,7 +91,7 @@ class Stats {
         this.genomeDist.push([...s.genomeSizeBuckets]);
 
         this.clusterSeries.push(s.clusterCoeff);
-        this.meanAgeSeries.push(s.meanAge);
+        this.meanAgeSeries.push(hexca.tick > 0 ? s.meanAge / hexca.tick : 0);
         this.ageDist.push([...s.ageBuckets]);
 
         this._birthAccum       = 0;
@@ -103,5 +104,6 @@ class Stats {
     draw(ctx) {
         for (const g of this.graphs) g.draw(ctx);
         this.histogram.draw(ctx);
+        this.ageHistogram.draw(ctx);
     }
 }
