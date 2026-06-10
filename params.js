@@ -1,4 +1,5 @@
 var PARAMETERS = {
+    asyncUpdate: false,    // if true, cells process in random order and update immediately
     updatesPerDraw: 50,
 
     // Canvas
@@ -44,6 +45,7 @@ function loadParameters() {
     PARAMETERS.localAtrophyRate  = parseFloat(document.getElementById('localAtrophyRate').value);
     PARAMETERS.globalAtrophyRate = parseFloat(document.getElementById('globalAtrophyRate').value);
     PARAMETERS.positiveRate  = parseFloat(document.getElementById('positiveRate').value);
+    PARAMETERS.asyncUpdate    = document.getElementById('asyncUpdate').checked;
     PARAMETERS.updatesPerDraw = parseInt(document.getElementById('updatesPerDraw').value);
     PARAMETERS.cellSize      = parseInt(document.getElementById('cellSize').value);
 }

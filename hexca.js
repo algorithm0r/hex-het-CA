@@ -57,6 +57,9 @@ class HexCA {
         this.firedSelf   = new Uint8Array(this.N * this.ncond);
         this.firedParent = new Uint8Array(this.N * this.ncond);
 
+        // Cell processing order buffer (shuffled each tick in async mode)
+        this._cellOrder = new Int32Array(this.N);
+
         // Global death conditions from last tick (conditions that killed at least one cell)
         this.globalEncountered = new Uint8Array(this.ncond);
 
@@ -155,8 +158,8 @@ class HexCA {
 
     // ── BFS for empty cells within depth ─────────────────────────────────────
 
-    _findEmptyCells(col, row, depth) {
-        const {cols, rows, nextColor} = this;
+    _findEmptyCells(col, row, depth, arr) {
+        const {cols, rows} = this;
         const visited = new Set();
         const empty = [];
         let frontier = [{col, row}];
@@ -173,7 +176,7 @@ class HexCA {
                     if (!visited.has(key)) {
                         visited.add(key);
                         next.push({col: nc, row: nr});
-                        if (nextColor[key] === -1) empty.push({col: nc, row: nr, key});
+                        if (arr[key] === -1) empty.push({col: nc, row: nr, key});
                     }
                 }
             }
@@ -186,15 +189,18 @@ class HexCA {
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered, _cellOrder} = this;
         const {k, pDeath} = PARAMETERS;
+        const asyncUpdate = PARAMETERS.asyncUpdate;
         const color      = this.color;
         const nextColor  = this.nextColor;
         const genomes    = this.genomes;
         const counter    = this.counter;
         const genomeSize = this.genomeSize;
 
-        nextColor.set(color);
+        // Sync: work on nextColor snapshot; async: write directly to color
+        const writeColor = asyncUpdate ? color : nextColor;
+        if (!asyncUpdate) nextColor.set(color);
         globalEncountered.fill(0);
 
         const reprodList = [];
@@ -203,68 +209,72 @@ class HexCA {
         let randomDeathsThisTick = 0;
 
         // ── Compute pass ──────────────────────────────────────────────────────
-        for (let col = 0; col < cols; col++) {
+        for (let oi = 0; oi < N; oi++) _cellOrder[oi] = oi;
+        if (asyncUpdate) shuffle(_cellOrder);
+
+        for (let oi = 0; oi < N; oi++) {
+            const i = _cellOrder[oi];
+            if (color[i] === -1) continue;
+
+            const col = Math.floor(i / rows);
+            const row = i % rows;
             const offsets = col % 2 === 0 ? EVEN_NEIGHBORS : ODD_NEIGHBORS;
-            for (let row = 0; row < rows; row++) {
-                const i = col * rows + row;
-                if (color[i] === -1) continue;
 
-                // Count living neighbors by color
-                _counts.fill(0);
-                for (const {dc, dr} of offsets) {
-                    const nc_color = color[((col + dc + cols) % cols) * rows + (row + dr + rows) % rows];
-                    if (nc_color >= 0) _counts[nc_color]++;
-                }
+            // Count living neighbors by color
+            _counts.fill(0);
+            for (const {dc, dr} of offsets) {
+                const nc_color = color[((col + dc + cols) % cols) * rows + (row + dr + rows) % rows];
+                if (nc_color >= 0) _counts[nc_color]++;
+            }
 
-                // Compute condition key (Horner base-7)
-                const s = color[i];
-                let key = s;
-                for (let c = 0; c < n; c++) key = key * 7 + _counts[c];
+            // Compute condition key (Horner base-7)
+            const s = color[i];
+            let key = s;
+            for (let c = 0; c < n; c++) key = key * 7 + _counts[c];
 
-                const condIdx = condLookup[key];
-                const rule    = condIdx >= 0 ? genomes[i * ncond + condIdx] : -1;
+            const condIdx = condLookup[key];
+            const rule    = condIdx >= 0 ? genomes[i * ncond + condIdx] : -1;
 
-                if (condIdx >= 0) globalEncountered[condIdx] = 1;
+            if (condIdx >= 0) globalEncountered[condIdx] = 1;
 
-                if (rule === -1) {
-                    nextColor[i] = -1;
-                    ruleDeathsThisTick++;
-                } else {
-                    firedSelf[i * ncond + condIdx] = 1;
-                    nextColor[i] = rule;
-                    if (rule !== s) {
-                        // MTF: find depth of new color, earn that energy, move to front
-                        const mtfBase = i * n;
-                        let idx = 0;
-                        while (idx < n && mtf[mtfBase + idx] !== rule) idx++;
-                        counter[i] += idx;
-                        for (let j = idx; j > 0; j--) mtf[mtfBase + j] = mtf[mtfBase + j - 1];
-                        mtf[mtfBase] = rule;
+            if (rule === -1) {
+                writeColor[i] = -1;
+                ruleDeathsThisTick++;
+            } else {
+                firedSelf[i * ncond + condIdx] = 1;
+                writeColor[i] = rule;
+                if (rule !== s) {
+                    // MTF: find depth of new color, earn that energy, move to front
+                    const mtfBase = i * n;
+                    let idx = 0;
+                    while (idx < n && mtf[mtfBase + idx] !== rule) idx++;
+                    counter[i] += idx;
+                    for (let j = idx; j > 0; j--) mtf[mtfBase + j] = mtf[mtfBase + j - 1];
+                    mtf[mtfBase] = rule;
 
-                        const threshold = k * genomeSize[i];
-                        if (threshold > 0 && counter[i] > threshold) {
-                            reprodList.push({col, row, i, depth: Math.floor(counter[i] / threshold)});
-                        }
+                    const threshold = k * genomeSize[i];
+                    if (threshold > 0 && counter[i] > threshold) {
+                        reprodList.push({col, row, i, depth: Math.floor(counter[i] / threshold)});
                     }
                 }
+            }
 
-                if (nextColor[i] !== -1 && Math.random() < pDeath) {
-                    nextColor[i] = -1;
-                    randomDeathsThisTick++;
-                }
+            if (writeColor[i] !== -1 && Math.random() < pDeath) {
+                writeColor[i] = -1;
+                randomDeathsThisTick++;
             }
         }
 
         // ── Reproduction pass ─────────────────────────────────────────────────
         shuffle(reprodList);
         for (const {col, row, i, depth} of reprodList) {
-            if (nextColor[i] === -1) continue;
+            if (writeColor[i] === -1) continue;
 
-            const candidates = this._findEmptyCells(col, row, depth);
+            const candidates = this._findEmptyCells(col, row, depth, writeColor);
             if (candidates.length === 0) continue;
 
             const target = candidates[randomInt(candidates.length)];
-            if (nextColor[target.key] !== -1) continue;
+            if (writeColor[target.key] !== -1) continue;
 
             genomes.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
             mtf.copyWithin(target.key * n, i * n, i * n + n);
@@ -288,14 +298,14 @@ class HexCA {
                 if (genomes[base + c] !== -1) newSize++;
             }
             genomeSize[target.key] = newSize;
-            nextColor[target.key]  = color[i];
+            writeColor[target.key] = color[i];
             counter[target.key]    = 0;
             counter[i]             = 0;
             birthsThisTick++;
         }
 
         // ── Apply pass ────────────────────────────────────────────────────────
-        color.set(nextColor);
+        if (!asyncUpdate) color.set(nextColor);
 
         // ── Stats pass ────────────────────────────────────────────────────────
         const stats = this.currentStats;
