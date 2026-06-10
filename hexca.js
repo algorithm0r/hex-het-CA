@@ -60,6 +60,9 @@ class HexCA {
         // Cell processing order buffer (shuffled each tick in async mode)
         this._cellOrder = new Int32Array(this.N);
 
+        // Reusable visited buffer for BFS (avoids Set allocation per call)
+        this._bfsVisited = new Uint8Array(this.N);
+
         // Global death conditions from last tick (conditions that killed at least one cell)
         this.globalEncountered = new Uint8Array(this.ncond);
 
@@ -159,11 +162,13 @@ class HexCA {
     // ── BFS for empty cells within depth ─────────────────────────────────────
 
     _findEmptyCells(col, row, depth, arr) {
-        const {cols, rows} = this;
-        const visited = new Set();
+        const {cols, rows, _bfsVisited} = this;
+        const visited = [];
         const empty = [];
         let frontier = [{col, row}];
-        visited.add(col * rows + row);
+        const startKey = col * rows + row;
+        _bfsVisited[startKey] = 1;
+        visited.push(startKey);
 
         for (let d = 0; d < depth; d++) {
             const next = [];
@@ -173,8 +178,9 @@ class HexCA {
                     const nc = (c + dc + cols) % cols;
                     const nr = (r + dr + rows) % rows;
                     const key = nc * rows + nr;
-                    if (!visited.has(key)) {
-                        visited.add(key);
+                    if (!_bfsVisited[key]) {
+                        _bfsVisited[key] = 1;
+                        visited.push(key);
                         next.push({col: nc, row: nr});
                         if (arr[key] === -1) empty.push({col: nc, row: nr, key});
                     }
@@ -183,6 +189,9 @@ class HexCA {
             frontier = next;
             if (frontier.length === 0) break;
         }
+
+        // Reset only visited cells (avoids full-array clear each call)
+        for (const k of visited) _bfsVisited[k] = 0;
         return empty;
     }
 
@@ -253,8 +262,12 @@ class HexCA {
                     mtf[mtfBase] = rule;
 
                     const threshold = k * genomeSize[i];
-                    if (threshold > 0 && counter[i] > threshold) {
-                        reprodList.push({col, row, i, depth: Math.min(Math.floor(counter[i] / threshold), 5)});
+                    if (threshold > 0) {
+                        const prevMult = Math.floor((counter[i] - idx) / threshold);
+                        const newMult  = Math.floor(counter[i] / threshold);
+                        if (newMult > prevMult && newMult >= 1) {
+                            reprodList.push({col, row, i, depth: Math.min(newMult, 5)});
+                        }
                     }
                 }
             }
