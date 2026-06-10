@@ -60,8 +60,16 @@ class HexCA {
         // Cell processing order buffer (shuffled each tick in async mode)
         this._cellOrder = new Int32Array(this.N);
 
-        // Reusable visited buffer for BFS (avoids Set allocation per call)
-        this._bfsVisited = new Uint8Array(this.N);
+        // Reusable flat buffers for BFS (eliminates all per-call allocation)
+        this._bfsVisited     = new Uint8Array(this.N);
+        this._bfsVisitedList = new Int32Array(this.N);
+        this._bfsFrontierA   = new Int32Array(this.N);
+        this._bfsFrontierB   = new Int32Array(this.N);
+        this._bfsEmpty       = new Int32Array(this.N);
+
+        // Flat reproduction list buffer: [col, row, i, depth] per entry
+        this._reprodBuf   = new Int32Array(this.N * 4);
+        this._reprodCount = 0;
 
         // Global death conditions from last tick (conditions that killed at least one cell)
         this.globalEncountered = new Uint8Array(this.ncond);
@@ -161,44 +169,53 @@ class HexCA {
 
     // ── BFS for empty cells within depth ─────────────────────────────────────
 
+    // Returns count of empty cells found; keys stored in this._bfsEmpty
     _findEmptyCells(col, row, depth, arr) {
-        const {cols, rows, _bfsVisited} = this;
-        const visited = [];
-        const empty = [];
-        let frontier = [{col, row}];
+        const {cols, rows, _bfsVisited, _bfsVisitedList, _bfsFrontierA, _bfsFrontierB, _bfsEmpty} = this;
+        let visitedCount = 0;
+        let emptyCount   = 0;
+
         const startKey = col * rows + row;
         _bfsVisited[startKey] = 1;
-        visited.push(startKey);
+        _bfsVisitedList[visitedCount++] = startKey;
+
+        let frontierBuf = _bfsFrontierA, nextBuf = _bfsFrontierB;
+        frontierBuf[0] = startKey;
+        let frontierCount = 1;
 
         for (let d = 0; d < depth; d++) {
-            const next = [];
-            for (const {col: c, row: r} of frontier) {
+            let nextCount = 0;
+            for (let f = 0; f < frontierCount; f++) {
+                const key = frontierBuf[f];
+                const c = (key / rows) | 0;
+                const r = key % rows;
                 const offsets = c % 2 === 0 ? EVEN_NEIGHBORS : ODD_NEIGHBORS;
-                for (const {dc, dr} of offsets) {
+                for (let o = 0; o < 6; o++) {
+                    const {dc, dr} = offsets[o];
                     const nc = (c + dc + cols) % cols;
                     const nr = (r + dr + rows) % rows;
-                    const key = nc * rows + nr;
-                    if (!_bfsVisited[key]) {
-                        _bfsVisited[key] = 1;
-                        visited.push(key);
-                        next.push({col: nc, row: nr});
-                        if (arr[key] === -1) empty.push({col: nc, row: nr, key});
+                    const nkey = nc * rows + nr;
+                    if (!_bfsVisited[nkey]) {
+                        _bfsVisited[nkey] = 1;
+                        _bfsVisitedList[visitedCount++] = nkey;
+                        nextBuf[nextCount++] = nkey;
+                        if (arr[nkey] === -1) _bfsEmpty[emptyCount++] = nkey;
                     }
                 }
             }
-            frontier = next;
-            if (frontier.length === 0) break;
+            const tmp = frontierBuf; frontierBuf = nextBuf; nextBuf = tmp;
+            frontierCount = nextCount;
+            if (frontierCount === 0) break;
         }
 
-        // Reset only visited cells (avoids full-array clear each call)
-        for (const k of visited) _bfsVisited[k] = 0;
-        return empty;
+        for (let v = 0; v < visitedCount; v++) _bfsVisited[_bfsVisitedList[v]] = 0;
+        return emptyCount;
     }
 
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered, _cellOrder} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered, _cellOrder, _reprodBuf, _bfsEmpty} = this;
         const {k, pDeath} = PARAMETERS;
         const asyncUpdate = PARAMETERS.asyncUpdate;
         const color      = this.color;
@@ -212,7 +229,7 @@ class HexCA {
         if (!asyncUpdate) nextColor.set(color);
         globalEncountered.fill(0);
 
-        const reprodList = [];
+        this._reprodCount = 0;
         let birthsThisTick     = 0;
         let ruleDeathsThisTick = 0;
         let randomDeathsThisTick = 0;
@@ -266,7 +283,12 @@ class HexCA {
                         const prevMult = Math.floor((counter[i] - idx) / threshold);
                         const newMult  = Math.floor(counter[i] / threshold);
                         if (newMult > prevMult && newMult >= 1) {
-                            reprodList.push({col, row, i, depth: Math.min(newMult, 5)});
+                            const rb = this._reprodCount * 4;
+                            _reprodBuf[rb]     = col;
+                            _reprodBuf[rb + 1] = row;
+                            _reprodBuf[rb + 2] = i;
+                            _reprodBuf[rb + 3] = Math.min(newMult, 5);
+                            this._reprodCount++;
                         }
                     }
                 }
@@ -279,24 +301,42 @@ class HexCA {
         }
 
         // ── Reproduction pass ─────────────────────────────────────────────────
-        shuffle(reprodList);
-        for (const {col, row, i, depth} of reprodList) {
+        // Shuffle flat reprod buffer (swap 4-int blocks)
+        const rc = this._reprodCount;
+        for (let s = rc - 1; s > 0; s--) {
+            const t = randomInt(s + 1);
+            const sb = s * 4, tb = t * 4;
+            for (let q = 0; q < 4; q++) {
+                const tmp = _reprodBuf[sb + q];
+                _reprodBuf[sb + q] = _reprodBuf[tb + q];
+                _reprodBuf[tb + q] = tmp;
+            }
+        }
+
+        const mutRate      = PARAMETERS.mutationRate;
+        const positiveRate = PARAMETERS.positiveRate;
+
+        for (let ri = 0; ri < rc; ri++) {
+            const rb    = ri * 4;
+            const col   = _reprodBuf[rb];
+            const row   = _reprodBuf[rb + 1];
+            const i     = _reprodBuf[rb + 2];
+            const depth = _reprodBuf[rb + 3];
+
             if (writeColor[i] === -1) continue;
 
-            const candidates = this._findEmptyCells(col, row, depth, writeColor);
-            if (candidates.length === 0) continue;
+            const emptyCount = this._findEmptyCells(col, row, depth, writeColor);
+            if (emptyCount === 0) continue;
 
-            const target = candidates[randomInt(candidates.length)];
-            if (writeColor[target.key] !== -1) continue;
+            const targetKey = _bfsEmpty[randomInt(emptyCount)];
+            if (writeColor[targetKey] !== -1) continue;
 
-            genomes.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
-            mtf.copyWithin(target.key * n, i * n, i * n + n);
-            firedParent.copyWithin(target.key * ncond, i * ncond, (i + 1) * ncond);
-            firedSelf.fill(0, target.key * ncond, (target.key + 1) * ncond);
+            genomes.copyWithin(targetKey * ncond, i * ncond, (i + 1) * ncond);
+            mtf.copyWithin(targetKey * n, i * n, i * n + n);
+            firedParent.copyWithin(targetKey * ncond, i * ncond, (i + 1) * ncond);
+            firedSelf.fill(0, targetKey * ncond, (targetKey + 1) * ncond);
 
-            const mutRate = PARAMETERS.mutationRate;
-            const positiveRate = PARAMETERS.positiveRate;
-            const base = target.key * ncond;
+            const base = targetKey * ncond;
             const iBase = i * ncond;
             let newSize = 0;
             for (let c = 0; c < ncond; c++) {
@@ -310,10 +350,10 @@ class HexCA {
                 }
                 if (genomes[base + c] !== -1) newSize++;
             }
-            genomeSize[target.key] = newSize;
-            writeColor[target.key] = color[i];
-            counter[target.key]    = 0;
-            counter[i]             = 0;
+            genomeSize[targetKey] = newSize;
+            writeColor[targetKey] = color[i];
+            counter[targetKey]    = 0;
+            counter[i]            = 0;
             birthsThisTick++;
         }
 
