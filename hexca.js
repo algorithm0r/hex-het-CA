@@ -420,7 +420,8 @@ class HexCA {
                 stats.genomeSizeBuckets[Math.min(numBuckets - 1, Math.floor(gs * numBuckets / (ncond + 1)))]++;
                 const age = tick - birthTick[i];
                 stats.meanAge += age;
-                stats.ageBuckets[tick > 0 ? Math.min(numBuckets - 1, Math.floor(age / tick * numBuckets)) : 0]++;
+                const maxDisplayAge = PARAMETERS.reportingPeriod * 10;
+                stats.ageBuckets[Math.min(numBuckets - 1, Math.floor(age / maxDisplayAge * numBuckets))]++;
             }
         }
         if (stats.liveCount > 0) stats.meanAge /= stats.liveCount;
