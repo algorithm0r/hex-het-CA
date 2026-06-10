@@ -43,6 +43,7 @@ class HexCA {
         // Flat typed arrays for performance
         this.color      = new Int8Array(this.N).fill(-1);
         this.nextColor  = new Int8Array(this.N).fill(-1);
+        this.prevColor  = new Int8Array(this.N).fill(-1);
         this.genomes    = new Int8Array(this.N * this.ncond).fill(-1);
         this.counter    = new Int32Array(this.N);
         this.genomeSize = new Int16Array(this.N);
@@ -94,6 +95,8 @@ class HexCA {
 
     _buildConditions() {
         const n = this.n;
+        const useHistory = PARAMETERS.historyRules;
+        this.useHistory = useHistory;
 
         // Enumerate count tuples (without selfColor)
         const tuples = [];
@@ -107,20 +110,26 @@ class HexCA {
         }
         fill(0, 6);
 
-        // Build conditions: [selfColor, ...counts]
+        // Build conditions: [selfColor, (prevColor if useHistory), ...counts]
         this.conditions = [];
-        for (let s = 0; s < n; s++) {
-            for (const t of tuples) this.conditions.push([s, ...t]);
+        if (useHistory) {
+            for (let s = 0; s < n; s++)
+                for (let p = 0; p < n; p++)
+                    for (const t of tuples) this.conditions.push([s, p, ...t]);
+        } else {
+            for (let s = 0; s < n; s++)
+                for (const t of tuples) this.conditions.push([s, ...t]);
         }
         this.ncond = this.conditions.length;
 
-        // Build lookup array: max key = n * 7^n - 1
-        const maxKey = n * Math.pow(7, n);
+        // Build lookup array
+        const maxKey = useHistory ? n * n * Math.pow(7, n) : n * Math.pow(7, n);
         this.condLookup = new Int16Array(maxKey).fill(-1);
         for (let i = 0; i < this.conditions.length; i++) {
             const cond = this.conditions[i];
-            let key = cond[0];
-            for (let c = 1; c <= n; c++) key = key * 7 + cond[c];
+            let key = useHistory ? cond[0] * n + cond[1] : cond[0];
+            const offset = useHistory ? 2 : 1;
+            for (let c = 0; c < n; c++) key = key * 7 + cond[offset + c];
             this.condLookup[key] = i;
         }
     }
@@ -215,7 +224,9 @@ class HexCA {
     // ── Main update ───────────────────────────────────────────────────────────
 
     update() {
-        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered, _cellOrder, _reprodBuf, _bfsEmpty} = this;
+        const {cols, rows, N, n, ncond, condLookup, _counts, mtf, firedSelf, firedParent, globalEncountered, _cellOrder, _reprodBuf, _bfsEmpty, prevColor} = this;
+        const useHistory     = this.useHistory;
+        const coherenceBonus = PARAMETERS.coherenceBonus;
         const {k, pDeath} = PARAMETERS;
         const asyncUpdate = PARAMETERS.asyncUpdate;
         const color      = this.color;
@@ -227,6 +238,7 @@ class HexCA {
         // Sync: work on nextColor snapshot; async: write directly to color
         const writeColor = asyncUpdate ? color : nextColor;
         if (!asyncUpdate) nextColor.set(color);
+        prevColor.set(color);
         globalEncountered.fill(0);
 
         this._reprodCount = 0;
@@ -255,7 +267,7 @@ class HexCA {
 
             // Compute condition key (Horner base-7)
             const s = color[i];
-            let key = s;
+            let key = useHistory ? s * n + prevColor[i] : s;
             for (let c = 0; c < n; c++) key = key * 7 + _counts[c];
 
             const condIdx = condLookup[key];
@@ -297,6 +309,26 @@ class HexCA {
             if (writeColor[i] !== -1 && Math.random() < pDeath) {
                 writeColor[i] = -1;
                 randomDeathsThisTick++;
+            }
+        }
+
+        // ── Coherence pass ────────────────────────────────────────────────────
+        if (coherenceBonus > 0) {
+            for (let i = 0; i < N; i++) {
+                if (writeColor[i] === -1) continue;
+                const pc = prevColor[i];
+                const nc = writeColor[i];
+                if (nc === pc) continue;
+                const col = (i / rows) | 0;
+                const row = i % rows;
+                const offsets = col % 2 === 0 ? EVEN_NEIGHBORS : ODD_NEIGHBORS;
+                let matches = 0;
+                for (let o = 0; o < 6; o++) {
+                    const {dc, dr} = offsets[o];
+                    const j = ((col + dc + cols) % cols) * rows + (row + dr + rows) % rows;
+                    if (writeColor[j] !== -1 && prevColor[j] === pc && writeColor[j] === nc) matches++;
+                }
+                if (matches > 0) counter[i] += matches * coherenceBonus;
             }
         }
 

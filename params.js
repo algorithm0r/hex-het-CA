@@ -1,5 +1,7 @@
 var PARAMETERS = {
     asyncUpdate: false,    // if true, cells process in random order and update immediately
+    historyRules: false,   // if true, prevColor is part of the condition key (takes effect on reset)
+    coherenceBonus: 0,     // energy per neighbor making the same prevColor→newColor transition
     updatesPerDraw: 50,
 
     // Canvas
@@ -46,6 +48,8 @@ function loadParameters() {
     PARAMETERS.globalAtrophyRate = parseFloat(document.getElementById('globalAtrophyRate').value);
     PARAMETERS.positiveRate  = parseFloat(document.getElementById('positiveRate').value);
     PARAMETERS.asyncUpdate    = document.getElementById('asyncUpdate').checked;
+    PARAMETERS.historyRules   = document.getElementById('historyRules').checked;
+    PARAMETERS.coherenceBonus = parseFloat(document.getElementById('coherenceBonus').value);
     PARAMETERS.updatesPerDraw = parseInt(document.getElementById('updatesPerDraw').value);
     PARAMETERS.cellSize      = parseInt(document.getElementById('cellSize').value);
 }
