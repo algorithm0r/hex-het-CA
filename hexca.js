@@ -254,7 +254,7 @@ class HexCA {
 
                     const threshold = k * genomeSize[i];
                     if (threshold > 0 && counter[i] > threshold) {
-                        reprodList.push({col, row, i, depth: Math.floor(counter[i] / threshold)});
+                        reprodList.push({col, row, i, depth: Math.min(Math.floor(counter[i] / threshold), 5)});
                     }
                 }
             }
