@@ -1,6 +1,19 @@
 var gameEngine = new GameEngine();
 var ASSET_MANAGER = new AssetManager();
 
+function toggleGenotypeView() {
+    PARAMETERS.drawGenotype = !PARAMETERS.drawGenotype;
+    const button = document.getElementById('genotypeViewButton');
+    if (button) button.textContent = PARAMETERS.drawGenotype
+        ? 'Show cell colors (G)' : 'Show genome colors (G)';
+}
+
+document.addEventListener('keydown', function (event) {
+    const tag = event.target && event.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+    if (event.key.toLowerCase() === 'g') toggleGenotypeView();
+});
+
 function reset() {
     loadParameters();
     gameEngine.entities = [];

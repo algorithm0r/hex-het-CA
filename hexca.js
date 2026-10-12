@@ -455,6 +455,15 @@ class HexCA {
     // ── Draw ──────────────────────────────────────────────────────────────────
 
     draw(ctx) {
+        if (PARAMETERS.drawGenotype) {
+            this._drawGenotype(ctx);
+        } else {
+            this._drawState(ctx);
+        }
+    }
+
+    // Original view: color cells by their current state.
+    _drawState(ctx) {
         const {n} = this;
         const size  = PARAMETERS.cellSize;
         const sqrt3 = Math.sqrt(3);
@@ -487,6 +496,97 @@ class HexCA {
                 ctx.closePath();
             }
             ctx.fill();
+        }
+    }
+
+    // Keep a fixed random RGB vector for each condition and possible rule output.
+    // This makes identical genomes share a color and related genomes tend to have
+    // more similar colors. The seeded generator keeps the mapping stable across resets.
+    _ensureGenomeProjection() {
+        if (this._genomeProjection && this._projectionN === this.n &&
+            this._projectionNcond === this.ncond) return;
+
+        let seed = 0x9e3779b9;
+        const random = () => {
+            seed |= 0;
+            seed = (seed + 0x6D2B79F5) | 0;
+            let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+
+        const slots = this.n + 1; // output colors plus the absent-rule value (-1)
+        const projection = new Float32Array(this.ncond * slots * 3);
+        for (let i = 0; i < projection.length; i++) {
+            projection[i] = random() * 2 - 1;
+        }
+        this._genomeProjection = projection;
+        this._projectionSlots = slots;
+        this._projectionN = this.n;
+        this._projectionNcond = this.ncond;
+    }
+
+    // Genome view: color each living cell by the full sequence of rules in its genome.
+    _drawGenotype(ctx) {
+        this._ensureGenomeProjection();
+
+        const size = PARAMETERS.cellSize;
+        const sqrt3 = Math.sqrt(3);
+        const projection = this._genomeProjection;
+        const slots = this._projectionSlots;
+        const rgbValues = new Float32Array(this.N * 3);
+        let low = Infinity, high = -Infinity;
+
+        for (let i = 0; i < this.N; i++) {
+            if (this.color[i] === -1) continue;
+            const base = i * this.ncond;
+            let red = 0, green = 0, blue = 0;
+
+            for (let q = 0; q < this.ncond; q++) {
+                // Genome values are -1 for an absent rule and 0..n-1 for a color.
+                const value = this.genomes[base + q] + 1;
+                const k = (q * slots + value) * 3;
+                red += projection[k];
+                green += projection[k + 1];
+                blue += projection[k + 2];
+            }
+
+            rgbValues[i * 3] = red;
+            rgbValues[i * 3 + 1] = green;
+            rgbValues[i * 3 + 2] = blue;
+            if (red < low) low = red;
+            if (red > high) high = red;
+            if (green < low) low = green;
+            if (green > high) high = green;
+            if (blue < low) low = blue;
+            if (blue > high) high = blue;
+        }
+
+        const range = (high - low) || 1;
+        ctx.fillStyle = DEAD_COLOR;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+        for (let col = 0; col < this.cols; col++) {
+            for (let row = 0; row < this.rows; row++) {
+                const i = col * this.rows + row;
+                if (this.color[i] === -1) continue;
+
+                const x = col * size * 1.5 + size;
+                const y = row * size * sqrt3 +
+                    (col % 2 === 1 ? size * sqrt3 / 2 : 0) + size;
+                const red = ((rgbValues[i * 3] - low) / range) * 200 + 40;
+                const green = ((rgbValues[i * 3 + 1] - low) / range) * 200 + 40;
+                const blue = ((rgbValues[i * 3 + 2] - low) / range) * 200 + 40;
+
+                ctx.fillStyle = rgb(red, green, blue);
+                ctx.beginPath();
+                ctx.moveTo(x + size * HEX_VERTS[0].x, y + size * HEX_VERTS[0].y);
+                for (let v = 1; v < 6; v++) {
+                    ctx.lineTo(x + size * HEX_VERTS[v].x, y + size * HEX_VERTS[v].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
         }
     }
 }

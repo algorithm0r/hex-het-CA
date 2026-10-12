@@ -1,4 +1,5 @@
 var PARAMETERS = {
+    drawGenotype: false,  // false = cell-state colors; true = genome/genotype colors
     asyncUpdate: false,    // if true, cells process in random order and update immediately
     historyRules: false,   // if true, prevColor is part of the condition key (takes effect on reset)
     coherenceBonus: 0,     // energy per neighbor making the same prevColor→newColor transition
