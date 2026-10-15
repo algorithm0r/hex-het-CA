@@ -73,8 +73,18 @@ class HexCA {
         this._reprodBuf   = new Int32Array(this.N * 4);
         this._reprodCount = 0;
 
-        // Global death conditions from last tick (conditions that killed at least one cell)
+        // Conditions encountered by any living cell last tick (matched OR unmatched).
+        // NOTE: despite the historical name/label, this is ALL encountered conditions,
+        // not only fatal ones. positiveRate reads this.
         this.globalEncountered = new Uint8Array(this.ncond);
+
+        // Cumulative per-condition encounter counts (reset each reporting period by Stats)
+        this.encounterCount = new Int32Array(this.ncond);
+        this.encounterTicks = 0;
+        this.encounterCellTicks = 0;
+
+        // Genotype->RGB random projection table (stable across resets for a given n)
+        this._buildGenotypeProjection();
 
         // Stats exposed each tick for Stats entity
         this.currentStats = {
@@ -89,6 +99,8 @@ class HexCA {
             meanAge: 0,
             maxAge: 1,
             ageBuckets: new Array(PARAMETERS.numGenomeBuckets).fill(0),
+            mtfDepthSum: 0,
+            transitions: 0,
         };
 
         this._initPopulation();
@@ -137,6 +149,83 @@ class HexCA {
             for (let c = 0; c < n; c++) key = key * 7 + cond[offset + c];
             this.condLookup[key] = i;
         }
+    }
+
+    // ── Genotype colouring ────────────────────────────────────────────────────
+    // Random projection of the one-hot genome into 3 dims -> RGB.
+    // Johnson-Lindenstrauss: similar genomes land on similar colours, so clonal
+    // domains read as uniform patches and lineage boundaries become visible.
+    // Seeded so the mapping is stable across resets (runs stay comparable).
+
+    _buildGenotypeProjection() {
+        const {ncond, n} = this;
+        const nOut = n + 1;                       // slot value -1..n-1  ->  index 0..n
+        this.projTable = new Float32Array(3 * ncond * nOut);
+
+        // mulberry32 — deterministic, so colours mean the same thing run to run
+        let seed = 0x9e3779b9 ^ (ncond * 2654435761) ^ n;
+        const rand = () => {
+            seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+            let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        // Box-Muller
+        const gauss = () => {
+            let u = 0, v = 0;
+            while (u === 0) u = rand();
+            while (v === 0) v = rand();
+            return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+        };
+
+        const scale = 1 / Math.sqrt(ncond);        // sum of ncond iid N(0,1) -> N(0,1)
+        for (let t = 0; t < this.projTable.length; t++) this.projTable[t] = gauss() * scale;
+
+        // EMA-smoothed normalisation so the palette adapts without flickering
+        this._projMean = [0, 0, 0];
+        this._projStd  = [1, 1, 1];
+        this._projInit = false;
+    }
+
+    // Project one cell's genome to 3 raw coordinates into out[]
+    _projectGenome(i, out) {
+        const {ncond, n, genomes, projTable} = this;
+        const nOut = n + 1;
+        const base = i * ncond;
+        let a = 0, b = 0, c = 0;
+        for (let q = 0; q < ncond; q++) {
+            const slot = genomes[base + q] + 1;    // -1 -> 0 (absent), colour k -> k+1
+            const off = (q * nOut + slot) * 3;
+            a += projTable[off];
+            b += projTable[off + 1];
+            c += projTable[off + 2];
+        }
+        out[0] = a; out[1] = b; out[2] = c;
+    }
+
+    // Refresh the EMA colour normalisation from the current living population
+    _updateProjNorm() {
+        const N = this.N, color = this.color;
+        const tmp = this._projTmp || (this._projTmp = new Float32Array(3));
+        let cnt = 0;
+        const sum = [0, 0, 0], sumSq = [0, 0, 0];
+        // Sample at most 400 cells — enough for mean/std, cheap every frame
+        const stride = Math.max(1, Math.floor(N / 400));
+        for (let i = 0; i < N; i += stride) {
+            if (color[i] === -1) continue;
+            this._projectGenome(i, tmp);
+            for (let k = 0; k < 3; k++) { sum[k] += tmp[k]; sumSq[k] += tmp[k] * tmp[k]; }
+            cnt++;
+        }
+        if (cnt < 2) return;
+        const alpha = this._projInit ? 0.08 : 1.0;
+        for (let k = 0; k < 3; k++) {
+            const mean = sum[k] / cnt;
+            const varr = Math.max(0, sumSq[k] / cnt - mean * mean);
+            this._projMean[k] += alpha * (mean - this._projMean[k]);
+            this._projStd[k]  += alpha * (Math.sqrt(varr) - this._projStd[k]);
+        }
+        this._projInit = true;
     }
 
     // ── Genome generation ─────────────────────────────────────────────────────
@@ -239,6 +328,8 @@ class HexCA {
         const genomes    = this.genomes;
         const counter    = this.counter;
         const genomeSize = this.genomeSize;
+        const encounterCount = this.encounterCount;
+        let encounterCellTicks = 0;
 
         // Sync: work on nextColor snapshot; async: write directly to color
         const writeColor = asyncUpdate ? color : nextColor;
@@ -250,6 +341,8 @@ class HexCA {
         let birthsThisTick     = 0;
         let ruleDeathsThisTick = 0;
         let randomDeathsThisTick = 0;
+        let mtfDepthSum        = 0;
+        let transitionsThisTick = 0;
 
         // ── Compute pass ──────────────────────────────────────────────────────
         for (let oi = 0; oi < N; oi++) _cellOrder[oi] = oi;
@@ -278,7 +371,8 @@ class HexCA {
             const condIdx = condLookup[key];
             const rule    = condIdx >= 0 ? genomes[i * ncond + condIdx] : -1;
 
-            if (condIdx >= 0) globalEncountered[condIdx] = 1;
+            if (condIdx >= 0) { globalEncountered[condIdx] = 1; encounterCount[condIdx]++; }
+            encounterCellTicks++;
 
             if (rule === -1) {
                 writeColor[i] = -1;
@@ -292,6 +386,8 @@ class HexCA {
                     let idx = 0;
                     while (idx < n && mtf[mtfBase + idx] !== rule) idx++;
                     counter[i] += idx;
+                    mtfDepthSum += idx;
+                    transitionsThisTick++;
                     for (let j = idx; j > 0; j--) mtf[mtfBase + j] = mtf[mtfBase + j - 1];
                     mtf[mtfBase] = rule;
 
@@ -403,6 +499,10 @@ class HexCA {
         stats.births      = birthsThisTick;
         stats.ruleDeaths  = ruleDeathsThisTick;
         stats.randomDeaths = randomDeathsThisTick;
+        stats.mtfDepthSum  = mtfDepthSum;
+        stats.transitions  = transitionsThisTick;
+        this.encounterTicks++;
+        this.encounterCellTicks += encounterCellTicks;
         stats.liveCount    = 0;
         stats.meanAge      = 0;
         stats.colorCounts.fill(0);
@@ -455,6 +555,7 @@ class HexCA {
     // ── Draw ──────────────────────────────────────────────────────────────────
 
     draw(ctx) {
+        if (PARAMETERS.drawMode === 'genotype') { this._drawGenotype(ctx); return; }
         const {n} = this;
         const size  = PARAMETERS.cellSize;
         const sqrt3 = Math.sqrt(3);
@@ -488,5 +589,63 @@ class HexCA {
             }
             ctx.fill();
         }
+    }
+
+    // ── Genotype view ─────────────────────────────────────────────────────────
+    // Colour by genome rather than state. Channels are quantised to 16 levels so
+    // that near-identical genomes batch into a single path — a clonal sweep draws
+    // as fast as the state view; only a genuinely diverse population costs more.
+
+    _drawGenotype(ctx) {
+        const size  = PARAMETERS.cellSize;
+        const sqrt3 = Math.sqrt(3);
+        const {cols, rows, color} = this;
+
+        this._updateProjNorm();
+        const tmp  = this._projTmp || (this._projTmp = new Float32Array(3));
+        const mean = this._projMean, std = this._projStd;
+
+        const batches = new Map();
+        const dead = [];
+
+        for (let col = 0; col < cols; col++) {
+            for (let row = 0; row < rows; row++) {
+                const i = col * rows + row;
+                const x = col * size * 1.5 + size;
+                const y = row * size * sqrt3 + (col % 2 === 1 ? size * sqrt3 / 2 : 0) + size;
+                if (color[i] === -1) { dead.push(x, y); continue; }
+
+                this._projectGenome(i, tmp);
+                let key = 0;
+                const rgbv = [0, 0, 0];
+                for (let k = 0; k < 3; k++) {
+                    const spread = Math.max(std[k], 0.15);
+                    let v = 128 + 127 * (tmp[k] - mean[k]) / (2.2 * spread);
+                    v = v < 0 ? 0 : v > 255 ? 255 : v;
+                    const q = Math.min(15, v >> 4);       // 16 levels per channel
+                    rgbv[k] = q * 17;                     // 0..255 evenly
+                    key = key * 16 + q;
+                }
+                let pts = batches.get(key);
+                if (pts === undefined) { pts = {c: rgb(rgbv[0], rgbv[1], rgbv[2]), p: []}; batches.set(key, pts); }
+                pts.p.push(x, y);
+            }
+        }
+
+        this._fillHexes(ctx, DEAD_COLOR, dead, size);
+        for (const b of batches.values()) this._fillHexes(ctx, b.c, b.p, size);
+    }
+
+    _fillHexes(ctx, fill, pts, size) {
+        if (pts.length === 0) return;
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        for (let p = 0; p < pts.length; p += 2) {
+            const cx = pts[p], cy = pts[p + 1];
+            ctx.moveTo(cx + size * HEX_VERTS[0].x, cy + size * HEX_VERTS[0].y);
+            for (let v = 1; v < 6; v++) ctx.lineTo(cx + size * HEX_VERTS[v].x, cy + size * HEX_VERTS[v].y);
+            ctx.closePath();
+        }
+        ctx.fill();
     }
 }

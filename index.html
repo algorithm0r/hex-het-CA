@@ -11,11 +11,13 @@
     <script type="text/javascript" src="./hexca.js"></script>
     <script type="text/javascript" src="./graph.js"></script>
     <script type="text/javascript" src="./histogram.js"></script>
+    <script type="text/javascript" src="./rulespace.js"></script>
+    <script type="text/javascript" src="./views.js"></script>
     <script type="text/javascript" src="./stats.js"></script>
     <script type="text/javascript" src="./main.js"></script>
 </head>
 <body>
-    <canvas id="gameWorld" width="1800" height="960"></canvas>
+    <canvas id="gameWorld" width="1800" height="1000"></canvas>
     <div id="controlPanel">
         <div id="frameRate">FPS: --</div>
         <div id="tickCount">Tick: 0</div>
@@ -69,6 +71,32 @@
 
             <label for="cellSize">Cell size (px):</label>
             <input type="number" id="cellSize" value="8" min="4" max="20" step="1" />
+
+            <hr style="border-color:#333; margin:8px 0;" />
+
+            <label for="statsPage">Stats page (keys 1-4):</label>
+            <select id="statsPage" onchange="setStatsPage(parseInt(this.value))">
+                <option value="0" selected>1 - Population</option>
+                <option value="1">2 - Rule space</option>
+                <option value="2">3 - Rasters</option>
+                <option value="3">4 - Trajectory</option>
+            </select>
+
+            <label for="rasterOrder">Raster row order (key O):</label>
+            <select id="rasterOrder" onchange="setRasterOrder(this.value)">
+                <option value="ndead" selected>dead neighbours, then lexicographic</option>
+                <option value="enum">enumeration order</option>
+                <option value="freq">current frequency</option>
+                <option value="cluster">co-variation (spectral)</option>
+            </select>
+
+            <label for="genotypeView">Genotype colouring on grid (key G):</label>
+            <input type="checkbox" id="genotypeView" onchange="PARAMETERS.drawMode = this.checked ? 'genotype' : 'state'" />
+
+            <button type="button" onclick="markReference()">Mark reference (M)</button>
+            <button type="button" onclick="exportRuleSpace()">Export rule-space JSON (E)</button>
+
+            <hr style="border-color:#333; margin:8px 0;" />
 
             <button type="button" onclick="reset()">Reset</button>
         </div>

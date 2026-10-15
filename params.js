@@ -4,9 +4,18 @@ var PARAMETERS = {
     coherenceBonus: 0,     // energy per neighbor making the same prevColor→newColor transition
     updatesPerDraw: 50,
 
+    // Views
+    statsPage: 0,          // 0 population, 1 rule space, 2 rasters, 3 trajectory
+    drawMode: 'state',     // 'state' | 'genotype'
+    rasterOrder: 'ndead',  // 'enum' | 'ndead' | 'freq' | 'cluster'
+
+    // Post-hoc export sampling
+    genomeSampleEvery: 10, // take a genome snapshot every Nth reporting sample
+    genomeSampleSize: 120, // cells per snapshot
+
     // Canvas
     canvasWidth: 1800,
-    canvasHeight: 960,
+    canvasHeight: 1000,
 
     // Grid
     gridCols: 100,
@@ -52,4 +61,7 @@ function loadParameters() {
     PARAMETERS.coherenceBonus = parseFloat(document.getElementById('coherenceBonus').value);
     PARAMETERS.updatesPerDraw = parseInt(document.getElementById('updatesPerDraw').value);
     PARAMETERS.cellSize      = parseInt(document.getElementById('cellSize').value);
+    PARAMETERS.rasterOrder   = document.getElementById('rasterOrder').value;
+    PARAMETERS.drawMode      = document.getElementById('genotypeView').checked ? 'genotype' : 'state';
+    PARAMETERS.statsPage     = parseInt(document.getElementById('statsPage').value);
 }
